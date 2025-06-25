@@ -1,0 +1,44 @@
+# Trivy Security Scanner Configuration
+# Enterprise vulnerability scanning for Project-5
+
+format: json
+output: /tmp/trivy-report.json
+
+# Vulnerability types to scan for
+vuln-type:
+  - os
+  - library
+
+# Severity levels to report
+severity:
+  - UNKNOWN
+  - LOW
+  - MEDIUM
+  - HIGH
+  - CRITICAL
+
+# Skip update of vulnerability database
+skip-update: false
+
+# Exit code when vulnerabilities are found
+exit-code: 1
+
+# Remove temporary files
+cleanup: true
+
+# Timeout for scanning
+timeout: 10m
+
+# Cache directory
+cache-dir: /tmp/trivy-cache
+
+# Ignore unfixed vulnerabilities
+ignore-unfixed: false
+
+# Custom ignore patterns
+.trivyignore: |
+  # Ignore specific CVEs that are not applicable
+  CVE-2021-12345
+  
+  # Ignore low severity in development
+  # CVE-2021-67890
