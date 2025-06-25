@@ -1,0 +1,199 @@
+# Jaeger configuration for Project-5 distributed tracing
+
+# Jaeger deployment strategy
+# Options: allInOne, production
+strategy: allInOne
+
+# All-in-one configuration (for development/testing)
+allInOne:
+  enabled: true
+  image: jaegertracing/all-in-one:1.50
+  pullPolicy: IfNotPresent
+  
+  # Resource limits
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 256m
+      memory: 256Mi
+  
+  # Storage configuration
+  storage:
+    type: memory
+    # For production, use elasticsearch
+    # type: elasticsearch
+    # elasticsearch:
+    #   host: elasticsearch-master
+    #   port: 9200
+    #   user: elastic
+    #   password: changeme
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    # Jaeger UI port
+    queryPort: 16686
+    # Jaeger collector port
+    collectorPort: 14268
+    # Jaeger agent port
+    agentPort: 6831
+    # Zipkin compatible port
+    zipkinPort: 9411
+  
+  # Ingress configuration
+  ingress:
+    enabled: false
+    annotations: {}
+    hosts:
+      - host: jaeger.project5.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  
+  # Environment variables
+  env:
+    - name: COLLECTOR_ZIPKIN_HOST_PORT
+      value: ":9411"
+    - name: JAEGER_DISABLED
+      value: "false"
+    - name: COLLECTOR_OTLP_ENABLED
+      value: "true"
+
+# Production deployment configuration (disabled by default)
+production:
+  enabled: false
+  
+  # Jaeger Collector
+  collector:
+    enabled: true
+    replicaCount: 2
+    image: jaegertracing/jaeger-collector:1.50
+    resources:
+      limits:
+        cpu: 1
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+    service:
+      type: ClusterIP
+      grpcPort: 14250
+      httpPort: 14268
+      zipkinPort: 9411
+  
+  # Jaeger Query (UI)
+  query:
+    enabled: true
+    replicaCount: 2
+    image: jaegertracing/jaeger-query:1.50
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 256m
+        memory: 256Mi
+    service:
+      type: ClusterIP
+      queryPort: 16686
+    ingress:
+      enabled: true
+      annotations:
+        kubernetes.io/ingress.class: nginx
+      hosts:
+        - host: jaeger.project5.local
+          paths:
+            - path: /
+              pathType: Prefix
+  
+  # Jaeger Agent
+  agent:
+    enabled: true
+    daemonset:
+      enabled: true
+    image: jaegertracing/jaeger-agent:1.50
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 256m
+        memory: 256Mi
+    service:
+      zipkinThriftPort: 5775
+      compactPort: 6831
+      binaryPort: 6832
+      samplingPort: 5778
+
+# Storage configuration for production
+storage:
+  type: elasticsearch
+  elasticsearch:
+    host: project5-elasticsearch-master
+    port: 9200
+    scheme: http
+    user: ""
+    password: ""
+    nodesWanOnly: false
+    useSSL: false
+    createIndexTemplates: true
+    indexPrefix: jaeger
+    
+# Sampling configuration
+sampling:
+  strategies: |
+    {
+      "service_strategies": [
+        {
+          "service": "frontend",
+          "type": "probabilistic",
+          "param": 0.5
+        },
+        {
+          "service": "backend-api",
+          "type": "probabilistic",
+          "param": 0.8
+        },
+        {
+          "service": "user-service",
+          "type": "probabilistic",
+          "param": 1.0
+        }
+      ],
+      "default_strategy": {
+        "type": "probabilistic",
+        "param": 0.1
+      }
+    }
+
+# Service account
+serviceAccount:
+  create: true
+  name: jaeger
+
+# Security context
+securityContext:
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Annotations
+annotations: {}
+
+# Labels
+labels:
+  app.kubernetes.io/name: jaeger
+  app.kubernetes.io/component: tracing
+  app.kubernetes.io/part-of: project5
