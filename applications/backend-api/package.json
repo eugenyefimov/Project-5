@@ -1,0 +1,67 @@
+{
+  "name": "project5-backend-api",
+  "version": "1.0.0",
+  "description": "Multi-cloud enterprise backend API for Project-5",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "build": "npm run lint && npm test",
+    "docker:build": "docker build -t project5-backend-api .",
+    "docker:run": "docker run -p 8000:8000 project5-backend-api"
+  },
+  "keywords": [
+    "nodejs",
+    "express",
+    "api",
+    "microservices",
+    "multi-cloud",
+    "enterprise"
+  ],
+  "author": "Evgeny Efimov",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "morgan": "^1.10.0",
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3",
+    "redis": "^4.6.7",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "joi": "^17.9.2",
+    "winston": "^3.10.0",
+    "compression": "^1.7.4",
+    "rate-limiter-flexible": "^4.0.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.0",
+    "prometheus-client": "^1.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.6.2",
+    "supertest": "^6.3.3",
+    "eslint": "^8.45.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.27.5",
+    "@types/jest": "^29.5.3"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eugenyefimov/Project-5.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eugenyefimov/Project-5/issues"
+  },
+  "homepage": "https://github.com/eugenyefimov/Project-5#readme"
+}

@@ -1,4 +1,4 @@
-# Prometheus Configuration for Project-5 Multi-Cloud Monitoring
+# Updated Prometheus Configuration for Project-5 Multi-Cloud Monitoring
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
