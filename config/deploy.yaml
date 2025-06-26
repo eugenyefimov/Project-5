@@ -1,0 +1,509 @@
+# Project-5 Deployment Configuration
+# Multi-cloud deployment settings for different environments
+
+# Global configuration
+global:
+  project:
+    name: "project-5"
+    version: "1.0.0"
+    description: "Enterprise Multi-Cloud Infrastructure"
+  
+  registry:
+    url: "${DOCKER_REGISTRY:-localhost:5000}"
+    namespace: "project5"
+  
+  monitoring:
+    enabled: true
+    prometheus:
+      enabled: true
+      port: 9090
+    grafana:
+      enabled: true
+      port: 3000
+  
+  security:
+    rbac:
+      enabled: true
+    networkPolicies:
+      enabled: true
+    podSecurityPolicies:
+      enabled: true
+
+# Environment-specific configurations
+environments:
+  development:
+    replicas:
+      frontend: 1
+      backend-api: 1
+      user-service: 1
+    
+    resources:
+      frontend:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+      backend-api:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+      user-service:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+    
+    database:
+      host: "localhost"
+      port: 5432
+      name: "project5_development"
+      ssl: false
+    
+    redis:
+      host: "localhost"
+      port: 6379
+      ssl: false
+    
+    ingress:
+      enabled: true
+      className: "nginx"
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /
+      hosts:
+        - host: "dev.project5.local"
+          paths:
+            - path: "/"
+              pathType: "Prefix"
+              service: "frontend"
+            - path: "/api"
+              pathType: "Prefix"
+              service: "backend-api"
+    
+    autoscaling:
+      enabled: false
+    
+    cloudProvider:
+      aws:
+        region: "us-west-2"
+        instanceType: "t3.medium"
+        nodeCount: 2
+      azure:
+        location: "West US 2"
+        vmSize: "Standard_B2s"
+        nodeCount: 2
+      gcp:
+        region: "us-west1"
+        machineType: "e2-medium"
+        nodeCount: 2
+
+  staging:
+    replicas:
+      frontend: 2
+      backend-api: 2
+      user-service: 2
+    
+    resources:
+      frontend:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+      backend-api:
+        requests:
+          cpu: "500m"
+          memory: "512Mi"
+        limits:
+          cpu: "2000m"
+          memory: "2Gi"
+      user-service:
+        requests:
+          cpu: "500m"
+          memory: "512Mi"
+        limits:
+          cpu: "2000m"
+          memory: "2Gi"
+    
+    database:
+      host: "${DB_HOST}"
+      port: 5432
+      name: "project5_staging"
+      ssl: true
+      connectionPool:
+        min: 5
+        max: 20
+    
+    redis:
+      host: "${REDIS_HOST}"
+      port: 6379
+      ssl: true
+      cluster: true
+    
+    ingress:
+      enabled: true
+      className: "nginx"
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        cert-manager.io/cluster-issuer: "letsencrypt-staging"
+      hosts:
+        - host: "staging.project5.com"
+          paths:
+            - path: "/"
+              pathType: "Prefix"
+              service: "frontend"
+            - path: "/api"
+              pathType: "Prefix"
+              service: "backend-api"
+      tls:
+        - secretName: "project5-staging-tls"
+          hosts:
+            - "staging.project5.com"
+    
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+    
+    cloudProvider:
+      aws:
+        region: "us-west-2"
+        instanceType: "t3.large"
+        nodeCount: 3
+        autoScaling:
+          enabled: true
+          minNodes: 2
+          maxNodes: 10
+      azure:
+        location: "West US 2"
+        vmSize: "Standard_B4ms"
+        nodeCount: 3
+        autoScaling:
+          enabled: true
+          minNodes: 2
+          maxNodes: 10
+      gcp:
+        region: "us-west1"
+        machineType: "e2-standard-4"
+        nodeCount: 3
+        autoScaling:
+          enabled: true
+          minNodes: 2
+          maxNodes: 10
+
+  production:
+    replicas:
+      frontend: 3
+      backend-api: 3
+      user-service: 3
+    
+    resources:
+      frontend:
+        requests:
+          cpu: "500m"
+          memory: "512Mi"
+        limits:
+          cpu: "2000m"
+          memory: "2Gi"
+      backend-api:
+        requests:
+          cpu: "1000m"
+          memory: "1Gi"
+        limits:
+          cpu: "4000m"
+          memory: "4Gi"
+      user-service:
+        requests:
+          cpu: "1000m"
+          memory: "1Gi"
+        limits:
+          cpu: "4000m"
+          memory: "4Gi"
+    
+    database:
+      host: "${DB_HOST}"
+      port: 5432
+      name: "project5_production"
+      ssl: true
+      connectionPool:
+        min: 10
+        max: 50
+      backup:
+        enabled: true
+        schedule: "0 2 * * *"
+        retention: "30d"
+    
+    redis:
+      host: "${REDIS_HOST}"
+      port: 6379
+      ssl: true
+      cluster: true
+      sentinel: true
+      backup:
+        enabled: true
+        schedule: "0 3 * * *"
+        retention: "7d"
+    
+    ingress:
+      enabled: true
+      className: "nginx"
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+        cert-manager.io/cluster-issuer: "letsencrypt-prod"
+        nginx.ingress.kubernetes.io/rate-limit: "100"
+        nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+      hosts:
+        - host: "project5.com"
+          paths:
+            - path: "/"
+              pathType: "Prefix"
+              service: "frontend"
+            - path: "/api"
+              pathType: "Prefix"
+              service: "backend-api"
+        - host: "www.project5.com"
+          paths:
+            - path: "/"
+              pathType: "Prefix"
+              service: "frontend"
+      tls:
+        - secretName: "project5-prod-tls"
+          hosts:
+            - "project5.com"
+            - "www.project5.com"
+    
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 20
+      targetCPUUtilizationPercentage: 60
+      targetMemoryUtilizationPercentage: 70
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 60
+          policies:
+            - type: "Percent"
+              value: 100
+              periodSeconds: 15
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: "Percent"
+              value: 10
+              periodSeconds: 60
+    
+    cloudProvider:
+      aws:
+        region: "us-west-2"
+        instanceType: "m5.xlarge"
+        nodeCount: 5
+        autoScaling:
+          enabled: true
+          minNodes: 3
+          maxNodes: 20
+        backup:
+          enabled: true
+          crossRegion: true
+      azure:
+        location: "West US 2"
+        vmSize: "Standard_D4s_v3"
+        nodeCount: 5
+        autoScaling:
+          enabled: true
+          minNodes: 3
+          maxNodes: 20
+        backup:
+          enabled: true
+          crossRegion: true
+      gcp:
+        region: "us-west1"
+        machineType: "n1-standard-4"
+        nodeCount: 5
+        autoScaling:
+          enabled: true
+          minNodes: 3
+          maxNodes: 20
+        backup:
+          enabled: true
+          crossRegion: true
+
+# Deployment strategies
+deploymentStrategies:
+  development:
+    type: "Recreate"
+  
+  staging:
+    type: "RollingUpdate"
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  
+  production:
+    type: "RollingUpdate"
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+    canary:
+      enabled: true
+      steps:
+        - setWeight: 10
+        - pause: {duration: "2m"}
+        - setWeight: 25
+        - pause: {duration: "5m"}
+        - setWeight: 50
+        - pause: {duration: "10m"}
+        - setWeight: 75
+        - pause: {duration: "5m"}
+        - setWeight: 100
+
+# Health checks
+healthChecks:
+  livenessProbe:
+    httpGet:
+      path: "/health"
+      port: "http"
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: "/health"
+      port: "http"
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Security configuration
+security:
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  
+  networkPolicies:
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                name: "ingress-nginx"
+        ports:
+          - protocol: "TCP"
+            port: 3000
+    egress:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                name: "kube-system"
+        ports:
+          - protocol: "TCP"
+            port: 53
+          - protocol: "UDP"
+            port: 53
+
+# Monitoring and observability
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: "30s"
+    path: "/metrics"
+  
+  alerts:
+    enabled: true
+    rules:
+      - alert: "HighCPUUsage"
+        expr: "cpu_usage > 80"
+        for: "5m"
+        labels:
+          severity: "warning"
+        annotations:
+          summary: "High CPU usage detected"
+      
+      - alert: "HighMemoryUsage"
+        expr: "memory_usage > 85"
+        for: "5m"
+        labels:
+          severity: "warning"
+        annotations:
+          summary: "High memory usage detected"
+      
+      - alert: "ServiceDown"
+        expr: "up == 0"
+        for: "1m"
+        labels:
+          severity: "critical"
+        annotations:
+          summary: "Service is down"
+
+# Backup and disaster recovery
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: "30d"
+  storage:
+    type: "s3"
+    bucket: "project5-backups"
+    region: "us-west-2"
+  
+  disasterRecovery:
+    enabled: true
+    rpo: "1h"  # Recovery Point Objective
+    rto: "4h"  # Recovery Time Objective
+    crossRegion: true
+    crossCloud: true
+
+# Logging configuration
+logging:
+  level: "info"
+  format: "json"
+  aggregation:
+    enabled: true
+    elasticsearch:
+      enabled: true
+      host: "${ELASTICSEARCH_HOST}"
+      index: "project5-logs"
+    fluentd:
+      enabled: true
+      configMap: "fluentd-config"
+
+# Feature flags
+featureFlags:
+  development:
+    debugMode: true
+    verboseLogging: true
+    mockExternalServices: true
+  
+  staging:
+    debugMode: false
+    verboseLogging: true
+    mockExternalServices: false
+    canaryDeployment: true
+  
+  production:
+    debugMode: false
+    verboseLogging: false
+    mockExternalServices: false
+    canaryDeployment: true
+    blueGreenDeployment: true

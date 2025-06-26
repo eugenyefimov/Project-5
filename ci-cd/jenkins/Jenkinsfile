@@ -1,0 +1,555 @@
+// Jenkins Pipeline for Project-5
+// Multi-cloud enterprise deployment pipeline
+
+pipeline {
+    agent {
+        kubernetes {
+            yaml """
+                apiVersion: v1
+                kind: Pod
+                spec:
+                  containers:
+                  - name: docker
+                    image: docker:20.10.17-dind
+                    securityContext:
+                      privileged: true
+                    volumeMounts:
+                    - name: docker-sock
+                      mountPath: /var/run/docker.sock
+                  - name: kubectl
+                    image: bitnami/kubectl:latest
+                    command:
+                    - cat
+                    tty: true
+                  - name: helm
+                    image: alpine/helm:latest
+                    command:
+                    - cat
+                    tty: true
+                  - name: node
+                    image: node:18-alpine
+                    command:
+                    - cat
+                    tty: true
+                  - name: trivy
+                    image: aquasec/trivy:latest
+                    command:
+                    - cat
+                    tty: true
+                  volumes:
+                  - name: docker-sock
+                    hostPath:
+                      path: /var/run/docker.sock
+            """
+        }
+    }
+    
+    environment {
+        // Docker Registry Configuration
+        DOCKER_REGISTRY = 'project5registry.azurecr.io'
+        IMAGE_REPOSITORY = 'project5'
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        
+        // Kubernetes Configuration
+        KUBECONFIG = credentials('kubeconfig')
+        
+        // Security Scanning
+        SONAR_TOKEN = credentials('sonar-token')
+        TRIVY_CACHE_DIR = '/tmp/trivy-cache'
+        
+        // Notification
+        SLACK_WEBHOOK = credentials('slack-webhook')
+        
+        // Environment specific
+        DEV_NAMESPACE = 'dev'
+        STAGING_NAMESPACE = 'staging'
+        PROD_NAMESPACE = 'production'
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+        ansiColor('xterm')
+    }
+    
+    triggers {
+        githubPush()
+        pollSCM('H/5 * * * *')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: "git rev-parse --short HEAD",
+                        returnStdout: true
+                    ).trim()
+                    env.GIT_BRANCH_NAME = sh(
+                        script: "git rev-parse --abbrev-ref HEAD",
+                        returnStdout: true
+                    ).trim()
+                }
+                echo "Building commit ${env.GIT_COMMIT_SHORT} from branch ${env.GIT_BRANCH_NAME}"
+            }
+        }
+        
+        stage('Code Quality & Security') {
+            parallel {
+                stage('Frontend Tests') {
+                    steps {
+                        container('node') {
+                            dir('applications/frontend') {
+                                sh 'npm ci'
+                                sh 'npm run lint'
+                                sh 'npm run test -- --coverage --watchAll=false'
+                                publishHTML([
+                                    allowMissing: false,
+                                    alwaysLinkToLastBuild: true,
+                                    keepAll: true,
+                                    reportDir: 'coverage/lcov-report',
+                                    reportFiles: 'index.html',
+                                    reportName: 'Frontend Coverage Report'
+                                ])
+                            }
+                        }
+                    }
+                }
+                
+                stage('Backend Tests') {
+                    steps {
+                        container('node') {
+                            dir('applications/backend-api') {
+                                sh 'npm ci'
+                                sh 'npm run lint'
+                                sh 'npm run test -- --coverage'
+                                publishHTML([
+                                    allowMissing: false,
+                                    alwaysLinkToLastBuild: true,
+                                    keepAll: true,
+                                    reportDir: 'coverage/lcov-report',
+                                    reportFiles: 'index.html',
+                                    reportName: 'Backend Coverage Report'
+                                ])
+                            }
+                        }
+                    }
+                }
+                
+                stage('SonarQube Analysis') {
+                    steps {
+                        container('node') {
+                            withSonarQubeEnv('SonarQube') {
+                                sh """
+                                    npx sonar-scanner \
+                                        -Dsonar.projectKey=project5 \
+                                        -Dsonar.projectName=Project-5 \
+                                        -Dsonar.sources=applications/ \
+                                        -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/coverage/** \
+                                        -Dsonar.javascript.lcov.reportPaths=applications/frontend/coverage/lcov.info,applications/backend-api/coverage/lcov.info
+                                """
+                            }
+                        }
+                    }
+                }
+                
+                stage('Security Scan - Filesystem') {
+                    steps {
+                        container('trivy') {
+                            sh """
+                                trivy fs --format sarif --output trivy-fs.sarif .
+                                trivy fs --format table .
+                            """
+                            archiveArtifacts artifacts: 'trivy-fs.sarif', fingerprint: true
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+        
+        stage('Build Images') {
+            parallel {
+                stage('Build Frontend') {
+                    steps {
+                        container('docker') {
+                            script {
+                                def frontendImage = "${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-frontend:${IMAGE_TAG}"
+                                sh """
+                                    cd applications/frontend
+                                    docker build -t ${frontendImage} .
+                                    docker tag ${frontendImage} ${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-frontend:latest
+                                """
+                                env.FRONTEND_IMAGE = frontendImage
+                            }
+                        }
+                    }
+                }
+                
+                stage('Build Backend') {
+                    steps {
+                        container('docker') {
+                            script {
+                                def backendImage = "${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-backend:${IMAGE_TAG}"
+                                sh """
+                                    cd applications/backend-api
+                                    docker build -t ${backendImage} .
+                                    docker tag ${backendImage} ${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-backend:latest
+                                """
+                                env.BACKEND_IMAGE = backendImage
+                            }
+                        }
+                    }
+                }
+                
+                stage('Build User Service') {
+                    steps {
+                        container('docker') {
+                            script {
+                                def userServiceImage = "${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-user-service:${IMAGE_TAG}"
+                                sh """
+                                    cd applications/microservices/user-service
+                                    docker build -t ${userServiceImage} .
+                                    docker tag ${userServiceImage} ${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-user-service:latest
+                                """
+                                env.USER_SERVICE_IMAGE = userServiceImage
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Security Scan - Images') {
+            parallel {
+                stage('Scan Frontend Image') {
+                    steps {
+                        container('trivy') {
+                            sh """
+                                trivy image --format sarif --output trivy-frontend.sarif ${env.FRONTEND_IMAGE}
+                                trivy image --severity HIGH,CRITICAL ${env.FRONTEND_IMAGE}
+                            """
+                            archiveArtifacts artifacts: 'trivy-frontend.sarif', fingerprint: true
+                        }
+                    }
+                }
+                
+                stage('Scan Backend Image') {
+                    steps {
+                        container('trivy') {
+                            sh """
+                                trivy image --format sarif --output trivy-backend.sarif ${env.BACKEND_IMAGE}
+                                trivy image --severity HIGH,CRITICAL ${env.BACKEND_IMAGE}
+                            """
+                            archiveArtifacts artifacts: 'trivy-backend.sarif', fingerprint: true
+                        }
+                    }
+                }
+                
+                stage('Scan User Service Image') {
+                    steps {
+                        container('trivy') {
+                            sh """
+                                trivy image --format sarif --output trivy-user-service.sarif ${env.USER_SERVICE_IMAGE}
+                                trivy image --severity HIGH,CRITICAL ${env.USER_SERVICE_IMAGE}
+                            """
+                            archiveArtifacts artifacts: 'trivy-user-service.sarif', fingerprint: true
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Push Images') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                    branch 'release/*'
+                }
+            }
+            steps {
+                container('docker') {
+                    withCredentials([usernamePassword(credentialsId: 'docker-registry-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh """
+                            echo $DOCKER_PASS | docker login ${DOCKER_REGISTRY} -u $DOCKER_USER --password-stdin
+                            
+                            docker push ${env.FRONTEND_IMAGE}
+                            docker push ${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-frontend:latest
+                            
+                            docker push ${env.BACKEND_IMAGE}
+                            docker push ${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-backend:latest
+                            
+                            docker push ${env.USER_SERVICE_IMAGE}
+                            docker push ${DOCKER_REGISTRY}/${IMAGE_REPOSITORY}-user-service:latest
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Development') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                container('helm') {
+                    sh """
+                        helm upgrade --install project5-dev infrastructure/helm-charts/project5 \
+                            --namespace ${DEV_NAMESPACE} \
+                            --create-namespace \
+                            --set image.tag=${IMAGE_TAG} \
+                            --set environment=development \
+                            --set ingress.hosts[0].host=dev.project5.example.com \
+                            --values infrastructure/helm-charts/project5/values-dev.yaml \
+                            --wait --timeout=10m
+                    """
+                }
+                container('kubectl') {
+                    sh """
+                        kubectl get pods,svc,ingress -n ${DEV_NAMESPACE}
+                        kubectl rollout status deployment/frontend -n ${DEV_NAMESPACE}
+                        kubectl rollout status deployment/backend-api -n ${DEV_NAMESPACE}
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                container('helm') {
+                    sh """
+                        helm upgrade --install project5-staging infrastructure/helm-charts/project5 \
+                            --namespace ${STAGING_NAMESPACE} \
+                            --create-namespace \
+                            --set image.tag=${IMAGE_TAG} \
+                            --set environment=staging \
+                            --set ingress.hosts[0].host=staging.project5.example.com \
+                            --values infrastructure/helm-charts/project5/values-staging.yaml \
+                            --wait --timeout=10m
+                    """
+                }
+                container('kubectl') {
+                    sh """
+                        kubectl get pods,svc,ingress -n ${STAGING_NAMESPACE}
+                        kubectl rollout status deployment/frontend -n ${STAGING_NAMESPACE}
+                        kubectl rollout status deployment/backend-api -n ${STAGING_NAMESPACE}
+                    """
+                }
+            }
+        }
+        
+        stage('Smoke Tests') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    def stagingUrl = 'https://staging.project5.example.com'
+                    def apiUrl = 'https://api.staging.project5.example.com'
+                    
+                    sh """
+                        # Wait for services to be ready
+                        sleep 30
+                        
+                        # Test frontend
+                        curl -f ${stagingUrl} || exit 1
+                        
+                        # Test backend health
+                        curl -f ${apiUrl}/health || exit 1
+                        
+                        # Test API endpoints
+                        curl -f ${apiUrl}/api/v1/status || exit 1
+                        
+                        echo "Smoke tests passed!"
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Production') {
+            when {
+                allOf {
+                    branch 'main'
+                    expression { return currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+                }
+            }
+            steps {
+                script {
+                    def deployToProduction = false
+                    
+                    try {
+                        timeout(time: 5, unit: 'MINUTES') {
+                            deployToProduction = input(
+                                message: 'Deploy to Production?',
+                                ok: 'Deploy',
+                                parameters: [
+                                    booleanParam(
+                                        defaultValue: false,
+                                        description: 'Confirm deployment to production',
+                                        name: 'DEPLOY_TO_PROD'
+                                    )
+                                ]
+                            )
+                        }
+                    } catch (err) {
+                        echo "Deployment to production was not approved within timeout"
+                        deployToProduction = false
+                    }
+                    
+                    if (deployToProduction) {
+                        container('helm') {
+                            sh """
+                                helm upgrade --install project5-prod infrastructure/helm-charts/project5 \
+                                    --namespace ${PROD_NAMESPACE} \
+                                    --create-namespace \
+                                    --set image.tag=${IMAGE_TAG} \
+                                    --set environment=production \
+                                    --set ingress.hosts[0].host=project5.example.com \
+                                    --values infrastructure/helm-charts/project5/values-prod.yaml \
+                                    --wait --timeout=15m
+                            """
+                        }
+                        container('kubectl') {
+                            sh """
+                                kubectl get pods,svc,ingress -n ${PROD_NAMESPACE}
+                                kubectl rollout status deployment/frontend -n ${PROD_NAMESPACE}
+                                kubectl rollout status deployment/backend-api -n ${PROD_NAMESPACE}
+                            """
+                        }
+                    } else {
+                        echo "Skipping production deployment"
+                    }
+                }
+            }
+        }
+        
+        stage('Production Health Check') {
+            when {
+                allOf {
+                    branch 'main'
+                    expression { return env.DEPLOY_TO_PROD == 'true' }
+                }
+            }
+            steps {
+                script {
+                    def prodUrl = 'https://project5.example.com'
+                    def apiUrl = 'https://api.project5.example.com'
+                    
+                    sh """
+                        # Wait for services to be ready
+                        sleep 60
+                        
+                        # Health check with retries
+                        for i in {1..10}; do
+                            if curl -f ${prodUrl} && curl -f ${apiUrl}/health; then
+                                echo "Production health check passed"
+                                break
+                            fi
+                            echo "Health check failed, retrying in 30s..."
+                            sleep 30
+                        done
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            // Clean up Docker images
+            container('docker') {
+                sh """
+                    docker image prune -f
+                    docker system prune -f
+                """
+            }
+            
+            // Archive artifacts
+            archiveArtifacts artifacts: '**/*.sarif', allowEmptyArchive: true
+            
+            // Publish test results
+            publishTestResults testResultsPattern: '**/test-results.xml', allowEmptyResults: true
+            
+            // Clean workspace
+            cleanWs()
+        }
+        
+        success {
+            script {
+                def message = """
+                    ✅ *Project-5 Pipeline Success*
+                    
+                    *Build:* ${env.BUILD_NUMBER}
+                    *Branch:* ${env.GIT_BRANCH_NAME}
+                    *Commit:* ${env.GIT_COMMIT_SHORT}
+                    *Image Tag:* ${IMAGE_TAG}
+                    
+                    *Deployed to:*
+                    ${env.GIT_BRANCH_NAME == 'develop' ? '• Development' : ''}
+                    ${env.GIT_BRANCH_NAME == 'main' ? '• Staging' : ''}
+                    ${env.DEPLOY_TO_PROD == 'true' ? '• Production' : ''}
+                """.stripIndent()
+                
+                sh """
+                    curl -X POST -H 'Content-type: application/json' \
+                        --data '{"text":"${message}"}' \
+                        ${SLACK_WEBHOOK}
+                """
+            }
+        }
+        
+        failure {
+            script {
+                def message = """
+                    ❌ *Project-5 Pipeline Failed*
+                    
+                    *Build:* ${env.BUILD_NUMBER}
+                    *Branch:* ${env.GIT_BRANCH_NAME}
+                    *Commit:* ${env.GIT_COMMIT_SHORT}
+                    *Stage:* ${env.STAGE_NAME}
+                    
+                    *Build URL:* ${env.BUILD_URL}
+                """.stripIndent()
+                
+                sh """
+                    curl -X POST -H 'Content-type: application/json' \
+                        --data '{"text":"${message}"}' \
+                        ${SLACK_WEBHOOK}
+                """
+            }
+        }
+        
+        unstable {
+            script {
+                def message = """
+                    ⚠️ *Project-5 Pipeline Unstable*
+                    
+                    *Build:* ${env.BUILD_NUMBER}
+                    *Branch:* ${env.GIT_BRANCH_NAME}
+                    *Commit:* ${env.GIT_COMMIT_SHORT}
+                    
+                    Please check test results and quality gates.
+                """.stripIndent()
+                
+                sh """
+                    curl -X POST -H 'Content-type: application/json' \
+                        --data '{"text":"${message}"}' \
+                        ${SLACK_WEBHOOK}
+                """
+            }
+        }
+    }
+}

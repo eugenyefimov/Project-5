@@ -1,0 +1,553 @@
+# Kubernetes Network Policies for Project-5
+# Implements Zero-Trust networking and micro-segmentation
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: project-5
+  labels:
+    app: project-5
+    component: security
+    policy-type: deny-all
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-network-policy
+  namespace: project-5
+  labels:
+    app: project-5
+    component: frontend
+    policy-type: application
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+      component: web
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from load balancer/ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000
+  # Allow ingress from monitoring (Prometheus)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 3000
+  egress:
+  # Allow egress to backend API
+  - to:
+    - podSelector:
+        matchLabels:
+          app: backend-api
+          component: api
+    ports:
+    - protocol: TCP
+      port: 8000
+  # Allow egress to DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow egress to external services (CDNs, APIs)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-api-network-policy
+  namespace: project-5
+  labels:
+    app: project-5
+    component: backend-api
+    policy-type: application
+spec:
+  podSelector:
+    matchLabels:
+      app: backend-api
+      component: api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from frontend
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontend
+          component: web
+    ports:
+    - protocol: TCP
+      port: 8000
+  # Allow ingress from user service
+  - from:
+    - podSelector:
+        matchLabels:
+          app: user-service
+          component: microservice
+    ports:
+    - protocol: TCP
+      port: 8000
+  # Allow ingress from load balancer for health checks
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000
+  # Allow ingress from monitoring
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  # Allow egress to database
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgresql
+          component: database
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow egress to user service
+  - to:
+    - podSelector:
+        matchLabels:
+          app: user-service
+          component: microservice
+    ports:
+    - protocol: TCP
+      port: 3001
+  # Allow egress to Redis (if used)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+          component: cache
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow egress to DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow egress to external APIs and services
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: user-service-network-policy
+  namespace: project-5
+  labels:
+    app: project-5
+    component: user-service
+    policy-type: microservice
+spec:
+  podSelector:
+    matchLabels:
+      app: user-service
+      component: microservice
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from backend API
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend-api
+          component: api
+    ports:
+    - protocol: TCP
+      port: 3001
+  # Allow ingress from monitoring
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 3001
+  egress:
+  # Allow egress to database
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgresql
+          component: database
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow egress to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+          component: cache
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow egress to DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow egress to external authentication services
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-network-policy
+  namespace: project-5
+  labels:
+    app: project-5
+    component: database
+    policy-type: data-tier
+spec:
+  podSelector:
+    matchLabels:
+      app: postgresql
+      component: database
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from backend API
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend-api
+          component: api
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow ingress from user service
+  - from:
+    - podSelector:
+        matchLabels:
+          app: user-service
+          component: microservice
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow ingress from backup jobs
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backup-job
+          component: maintenance
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow ingress from monitoring (postgres-exporter)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: postgres-exporter
+          component: monitoring
+    ports:
+    - protocol: TCP
+      port: 5432
+  egress:
+  # Allow egress to DNS for hostname resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow egress for database replication (if configured)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgresql
+          component: database
+          role: replica
+    ports:
+    - protocol: TCP
+      port: 5432
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-network-policy
+  namespace: project-5
+  labels:
+    app: project-5
+    component: cache
+    policy-type: data-tier
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+      component: cache
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from backend API
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend-api
+          component: api
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow ingress from user service
+  - from:
+    - podSelector:
+        matchLabels:
+          app: user-service
+          component: microservice
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow ingress from monitoring (redis-exporter)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: redis-exporter
+          component: monitoring
+    ports:
+    - protocol: TCP
+      port: 6379
+  egress:
+  # Allow egress to DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-network-policy
+  namespace: monitoring
+  labels:
+    app: project-5
+    component: monitoring
+    policy-type: infrastructure
+spec:
+  podSelector:
+    matchLabels:
+      app: prometheus
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from Grafana
+  - from:
+    - podSelector:
+        matchLabels:
+          app: grafana
+    ports:
+    - protocol: TCP
+      port: 9090
+  # Allow ingress from AlertManager
+  - from:
+    - podSelector:
+        matchLabels:
+          app: alertmanager
+    ports:
+    - protocol: TCP
+      port: 9090
+  # Allow ingress from ingress controller for external access
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow egress to scrape targets in project-5 namespace
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: project-5
+    ports:
+    - protocol: TCP
+      port: 3000  # Frontend
+    - protocol: TCP
+      port: 8000  # Backend API
+    - protocol: TCP
+      port: 3001  # User Service
+  # Allow egress to node-exporter
+  - to:
+    - podSelector:
+        matchLabels:
+          app: node-exporter
+    ports:
+    - protocol: TCP
+      port: 9100
+  # Allow egress to kube-state-metrics
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kube-state-metrics
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow egress to DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow egress to Kubernetes API
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 6443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backup-jobs-network-policy
+  namespace: project-5
+  labels:
+    app: project-5
+    component: backup
+    policy-type: maintenance
+spec:
+  podSelector:
+    matchLabels:
+      app: backup-job
+      component: maintenance
+  policyTypes:
+  - Ingress
+  - Egress
+  egress:
+  # Allow egress to database for backup
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgresql
+          component: database
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow egress to external backup storage
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS for cloud storage APIs
+  # Allow egress to DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+# Network Policy for cross-namespace communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cross-namespace-policy
+  namespace: project-5
+  labels:
+    app: project-5
+    component: security
+    policy-type: cross-namespace
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  # Allow ingress from ingress-nginx namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+  egress:
+  # Allow egress to monitoring namespace
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  # Allow egress to kube-system for DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

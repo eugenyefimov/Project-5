@@ -1,0 +1,574 @@
+# Role-Based Access Control (RBAC) Policies for Project-5
+# Implements least-privilege access control across the multi-cloud infrastructure
+
+# Namespace for Project-5 application
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: project-5
+  labels:
+    name: project-5
+    security.policy: restricted
+    network.policy: enabled
+
+---
+# Service Account for Frontend Application
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend-service-account
+  namespace: project-5
+  labels:
+    app: project-5
+    component: frontend
+    tier: web
+automountServiceAccountToken: false
+
+---
+# Service Account for Backend API
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backend-api-service-account
+  namespace: project-5
+  labels:
+    app: project-5
+    component: backend-api
+    tier: api
+automountServiceAccountToken: true
+
+---
+# Service Account for User Service
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: user-service-service-account
+  namespace: project-5
+  labels:
+    app: project-5
+    component: user-service
+    tier: microservice
+automountServiceAccountToken: true
+
+---
+# Service Account for Database Operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: database-service-account
+  namespace: project-5
+  labels:
+    app: project-5
+    component: database
+    tier: data
+automountServiceAccountToken: false
+
+---
+# Service Account for Monitoring
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-service-account
+  namespace: project-5
+  labels:
+    app: project-5
+    component: monitoring
+    tier: infrastructure
+automountServiceAccountToken: true
+
+---
+# Service Account for Backup Jobs
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backup-service-account
+  namespace: project-5
+  labels:
+    app: project-5
+    component: backup
+    tier: maintenance
+automountServiceAccountToken: true
+
+---
+# ClusterRole for Application Read Access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: project-5-app-reader
+  labels:
+    app: project-5
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Role for Backend API Operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: project-5
+  name: backend-api-role
+  labels:
+    app: project-5
+    component: backend-api
+rules:
+# Allow reading ConfigMaps and Secrets for configuration
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["backend-api-secrets", "database-credentials"]
+# Allow reading own pod information
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["backend-api-*"]
+# Allow reading service information for service discovery
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Role for User Service Operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: project-5
+  name: user-service-role
+  labels:
+    app: project-5
+    component: user-service
+rules:
+# Allow reading ConfigMaps and specific Secrets
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["user-service-secrets", "database-credentials", "jwt-secrets"]
+# Allow reading own pod information
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["user-service-*"]
+# Allow reading service information
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Role for Monitoring Operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: project-5
+  name: monitoring-role
+  labels:
+    app: project-5
+    component: monitoring
+rules:
+# Allow reading all resources for monitoring
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies", "ingresses"]
+  verbs: ["get", "list", "watch"]
+# Allow reading metrics
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+---
+# Role for Backup Operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: project-5
+  name: backup-role
+  labels:
+    app: project-5
+    component: backup
+rules:
+# Allow reading ConfigMaps and backup-related Secrets
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["backup-credentials", "database-credentials", "storage-credentials"]
+# Allow reading pod and service information
+- apiGroups: [""]
+  resources: ["pods", "services"]
+  verbs: ["get", "list", "watch"]
+# Allow creating and managing backup jobs
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+# ClusterRole for Monitoring (cluster-wide access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: project-5-monitoring-cluster-role
+  labels:
+    app: project-5
+    component: monitoring
+rules:
+# Allow reading cluster-wide resources for monitoring
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "nodes/metrics", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "daemonsets", "replicasets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch"]
+# Allow accessing metrics APIs
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list"]
+- nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+  verbs: ["get"]
+
+---
+# RoleBinding for Backend API
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backend-api-role-binding
+  namespace: project-5
+  labels:
+    app: project-5
+    component: backend-api
+subjects:
+- kind: ServiceAccount
+  name: backend-api-service-account
+  namespace: project-5
+roleRef:
+  kind: Role
+  name: backend-api-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for User Service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: user-service-role-binding
+  namespace: project-5
+  labels:
+    app: project-5
+    component: user-service
+subjects:
+- kind: ServiceAccount
+  name: user-service-service-account
+  namespace: project-5
+roleRef:
+  kind: Role
+  name: user-service-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for Monitoring
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: monitoring-role-binding
+  namespace: project-5
+  labels:
+    app: project-5
+    component: monitoring
+subjects:
+- kind: ServiceAccount
+  name: monitoring-service-account
+  namespace: project-5
+roleRef:
+  kind: Role
+  name: monitoring-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for Backup Operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backup-role-binding
+  namespace: project-5
+  labels:
+    app: project-5
+    component: backup
+subjects:
+- kind: ServiceAccount
+  name: backup-service-account
+  namespace: project-5
+roleRef:
+  kind: Role
+  name: backup-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRoleBinding for Monitoring (cluster-wide)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: project-5-monitoring-cluster-role-binding
+  labels:
+    app: project-5
+    component: monitoring
+subjects:
+- kind: ServiceAccount
+  name: monitoring-service-account
+  namespace: project-5
+roleRef:
+  kind: ClusterRole
+  name: project-5-monitoring-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Pod Security Policy for Project-5 (if PSP is enabled)
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: project-5-restricted-psp
+  labels:
+    app: project-5
+    security.policy: restricted
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  readOnlyRootFilesystem: false
+  seLinux:
+    rule: 'RunAsAny'
+
+---
+# ClusterRole for Pod Security Policy
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: project-5-psp-user
+  labels:
+    app: project-5
+    security.policy: restricted
+rules:
+- apiGroups: ['policy']
+  resources: ['podsecuritypolicies']
+  verbs: ['use']
+  resourceNames:
+  - project-5-restricted-psp
+
+---
+# ClusterRoleBinding for Pod Security Policy
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: project-5-psp-binding
+  labels:
+    app: project-5
+    security.policy: restricted
+roleRef:
+  kind: ClusterRole
+  name: project-5-psp-user
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: frontend-service-account
+  namespace: project-5
+- kind: ServiceAccount
+  name: backend-api-service-account
+  namespace: project-5
+- kind: ServiceAccount
+  name: user-service-service-account
+  namespace: project-5
+- kind: ServiceAccount
+  name: database-service-account
+  namespace: project-5
+- kind: ServiceAccount
+  name: monitoring-service-account
+  namespace: project-5
+- kind: ServiceAccount
+  name: backup-service-account
+  namespace: project-5
+
+---
+# Role for CI/CD Pipeline
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: project-5
+  name: cicd-deployment-role
+  labels:
+    app: project-5
+    component: cicd
+rules:
+# Allow managing deployments
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Allow managing services
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Allow managing ConfigMaps and Secrets
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Allow managing ingresses
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Allow reading pods for deployment status
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+# Allow managing HPA
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+# Service Account for CI/CD Pipeline
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cicd-service-account
+  namespace: project-5
+  labels:
+    app: project-5
+    component: cicd
+automountServiceAccountToken: true
+
+---
+# RoleBinding for CI/CD Pipeline
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cicd-deployment-role-binding
+  namespace: project-5
+  labels:
+    app: project-5
+    component: cicd
+subjects:
+- kind: ServiceAccount
+  name: cicd-service-account
+  namespace: project-5
+roleRef:
+  kind: Role
+  name: cicd-deployment-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Role for Development Environment (more permissive)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: project-5
+  name: developer-role
+  labels:
+    app: project-5
+    component: development
+    environment: dev
+rules:
+# Allow reading most resources
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies", "ingresses"]
+  verbs: ["get", "list", "watch"]
+# Allow port-forwarding for debugging
+- apiGroups: [""]
+  resources: ["pods/portforward"]
+  verbs: ["create"]
+# Allow accessing logs
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
+# Allow exec into pods for debugging (dev environment only)
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+
+---
+# Role for Production Environment (read-only)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: project-5
+  name: production-readonly-role
+  labels:
+    app: project-5
+    component: production
+    environment: prod
+rules:
+# Allow reading resources only
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies", "ingresses"]
+  verbs: ["get", "list", "watch"]
+# Allow accessing logs for troubleshooting
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
+# Allow port-forwarding for emergency debugging
+- apiGroups: [""]
+  resources: ["pods/portforward"]
+  verbs: ["create"]

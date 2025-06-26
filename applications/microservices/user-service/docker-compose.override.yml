@@ -1,0 +1,365 @@
+# Docker Compose Override for Development
+# This file is automatically loaded by docker-compose and provides development-specific configurations
+
+version: '3.8'
+
+services:
+  # User Service Development Overrides
+  user-service:
+    build:
+      target: development
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+      - ENABLE_DEBUG=true
+      - ENABLE_HOT_RELOAD=true
+      - ENABLE_SWAGGER=true
+      - ENABLE_METRICS=true
+      - ENABLE_PROFILING=true
+      - DEBUG=user-service:*
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./temp:/app/temp
+    command: npm run dev
+    stdin_open: true
+    tty: true
+    ports:
+      - "3002:3002"
+      - "9229:9229"  # Node.js debug port
+      - "9230:9230"  # Additional debug port
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.user-service-dev.rule=Host(`user-service.localhost`)"
+      - "traefik.http.services.user-service-dev.loadbalancer.server.port=3002"
+      - "traefik.http.routers.user-service-dev.middlewares=cors-headers"
+
+  # PostgreSQL Development Overrides
+  postgres:
+    environment:
+      - POSTGRES_DB=project5_dev
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+      - ./database/backups:/backups
+      - ./database/scripts:/scripts
+    command: >
+      postgres
+      -c log_statement=all
+      -c log_destination=stderr
+      -c log_min_messages=info
+      -c log_min_error_statement=info
+      -c log_min_duration_statement=0
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # Redis Development Overrides
+  redis:
+    environment:
+      - REDIS_PASSWORD=password
+    volumes:
+      - redis_data:/data
+      - ./redis/redis-dev.conf:/usr/local/etc/redis/redis.conf
+    command: >
+      redis-server /usr/local/etc/redis/redis.conf
+      --requirepass password
+      --loglevel debug
+      --save 60 1
+      --appendonly yes
+      --appendfsync everysec
+
+  # pgAdmin Development Overrides
+  pgadmin:
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=dev@project5.com
+      - PGADMIN_DEFAULT_PASSWORD=dev123
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+      - PGADMIN_CONFIG_WTF_CSRF_ENABLED=False
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./database/pgadmin/servers.json:/pgadmin4/servers.json
+      - ./database/pgadmin/preferences.json:/pgadmin4/preferences.json
+
+  # Redis Commander Development Overrides
+  redis-commander:
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:password,test:redis-test:6379:0
+      - HTTP_USER=dev
+      - HTTP_PASSWORD=dev123
+      - URL_PREFIX=/redis
+
+  # Prometheus Development Overrides
+  prometheus:
+    volumes:
+      - ./monitoring/prometheus-dev.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=24h'
+      - '--web.enable-lifecycle'
+      - '--log.level=debug'
+      - '--web.enable-admin-api'
+
+  # Grafana Development Overrides
+  grafana:
+    environment:
+      - GF_SECURITY_ADMIN_USER=dev
+      - GF_SECURITY_ADMIN_PASSWORD=dev123
+      - GF_USERS_ALLOW_SIGN_UP=true
+      - GF_USERS_DEFAULT_THEME=dark
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/user-service-overview.json
+      - GF_FEATURE_TOGGLES_ENABLE=ngalert
+      - GF_LOG_LEVEL=debug
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/plugins:/var/lib/grafana/plugins
+
+  # Jaeger Development Overrides
+  jaeger:
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=debug
+      - SPAN_STORAGE_TYPE=memory
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector
+      - "14250:14250"  # Jaeger gRPC
+      - "6831:6831/udp"  # Jaeger agent
+      - "6832:6832/udp"  # Jaeger agent
+      - "5778:5778"     # Jaeger agent configs
+      - "9411:9411"     # Zipkin compatible endpoint
+
+  # Elasticsearch Development Overrides
+  elasticsearch:
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - cluster.name=user-service-dev
+      - node.name=user-service-dev-node
+      - bootstrap.memory_lock=true
+      - logger.level=DEBUG
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./monitoring/elasticsearch/config:/usr/share/elasticsearch/config
+
+  # Kibana Development Overrides
+  kibana:
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - xpack.security.enabled=false
+      - SERVER_NAME=kibana-dev
+      - LOGGING_LEVEL=debug
+      - XPACK_MONITORING_ENABLED=true
+    volumes:
+      - ./monitoring/kibana/config:/usr/share/kibana/config
+
+  # Logstash Development Overrides
+  logstash:
+    environment:
+      - "LS_JAVA_OPTS=-Xmx256m -Xms256m"
+      - PIPELINE_WORKERS=2
+      - LOG_LEVEL=debug
+      - XPACK_MONITORING_ENABLED=true
+      - XPACK_MONITORING_ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    volumes:
+      - ./monitoring/logstash/pipeline:/usr/share/logstash/pipeline
+      - ./monitoring/logstash/config:/usr/share/logstash/config
+      - ./logs:/usr/share/logstash/logs
+      - ./monitoring/logstash/patterns:/usr/share/logstash/patterns
+
+  # Nginx Development Overrides
+  nginx:
+    volumes:
+      - ./nginx/nginx-dev.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/logs:/var/log/nginx
+      - ./nginx/html:/usr/share/nginx/html
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nginx-dev.rule=Host(`nginx.localhost`)"
+      - "traefik.http.services.nginx-dev.loadbalancer.server.port=80"
+
+  # Mailhog Development Overrides
+  mailhog:
+    environment:
+      - MH_STORAGE=maildir
+      - MH_MAILDIR_PATH=/maildir
+    volumes:
+      - ./mailhog/maildir:/maildir
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailhog-dev.rule=Host(`mail.localhost`)"
+      - "traefik.http.services.mailhog-dev.loadbalancer.server.port=8025"
+
+  # MinIO Development Overrides
+  minio:
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
+    volumes:
+      - minio_data:/data
+      - ./minio/policies:/policies
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.minio-dev.rule=Host(`minio.localhost`)"
+      - "traefik.http.services.minio-dev.loadbalancer.server.port=9000"
+      - "traefik.http.routers.minio-console-dev.rule=Host(`minio-console.localhost`)"
+      - "traefik.http.services.minio-console-dev.loadbalancer.server.port=9001"
+
+  # Traefik Development Overrides
+  traefik:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik-dev.yml:/etc/traefik/traefik.yml
+      - ./traefik/dynamic:/etc/traefik/dynamic
+      - ./traefik/logs:/var/log/traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dev.rule=Host(`traefik.localhost`)"
+      - "traefik.http.services.traefik-dev.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolallowmethods=GET,OPTIONS,PUT,POST,DELETE,PATCH"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolallowheaders=*"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolalloworiginlist=*"
+      - "traefik.http.middlewares.cors-headers.headers.accesscontrolmaxage=100"
+      - "traefik.http.middlewares.cors-headers.headers.addvaryheader=true"
+
+  # Development Tools Container
+  dev-tools:
+    image: node:18-alpine
+    container_name: dev-tools
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    command: tail -f /dev/null
+    networks:
+      - project5-network
+    profiles:
+      - tools
+
+  # Database Migration Tool
+  db-migrate:
+    image: node:18-alpine
+    container_name: db-migrate
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=project5_dev
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npm run migrate
+    networks:
+      - project5-network
+    profiles:
+      - migration
+
+  # Database Seeder
+  db-seed:
+    image: node:18-alpine
+    container_name: db-seed
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=project5_dev
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npm run seed
+    networks:
+      - project5-network
+    profiles:
+      - seeding
+
+  # Test Runner
+  test-runner:
+    image: node:18-alpine
+    container_name: test-runner
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./test-results:/app/test-results
+      - ./coverage:/app/coverage
+    environment:
+      - NODE_ENV=test
+      - DB_HOST=postgres-test
+      - DB_PORT=5432
+      - DB_NAME=project5_test
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+    depends_on:
+      - postgres-test
+      - redis-test
+    command: npm run test:all
+    networks:
+      - project5-network
+    profiles:
+      - testing
+
+# Additional volumes for development
+volumes:
+  postgres_data:
+  postgres_test_data:
+  redis_data:
+  pgadmin_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+  minio_data:
+
+networks:
+  project5-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

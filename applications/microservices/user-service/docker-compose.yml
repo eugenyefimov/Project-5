@@ -1,0 +1,403 @@
+version: '3.8'
+
+services:
+  # User Service
+  user-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: user-service
+    ports:
+      - "3002:3002"
+      - "9229:9229"  # Debug port
+    environment:
+      - NODE_ENV=development
+      - PORT=3002
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=project5_dev
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - JWT_REFRESH_SECRET=your-super-secret-refresh-key-change-in-production
+      - BCRYPT_ROUNDS=10
+      - RATE_LIMIT_WINDOW_MS=900000
+      - RATE_LIMIT_MAX_REQUESTS=100
+      - LOG_LEVEL=debug
+      - ENABLE_SWAGGER=true
+      - ENABLE_METRICS=true
+      - CORS_ORIGIN=http://localhost:3000,http://localhost:3001
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - project5-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.user-service.rule=Host(`user-service.localhost`)"
+      - "traefik.http.services.user-service.loadbalancer.server.port=3002"
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-user-service
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=project5_dev
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+      - ./database/backups:/backups
+    networks:
+      - project5-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d project5_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c max_worker_processes=8
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_workers=8
+      -c max_parallel_maintenance_workers=4
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: redis-user-service
+    ports:
+      - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=password
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - project5-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass password
+
+  # Redis Commander (Redis GUI)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:password
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin
+    depends_on:
+      - redis
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # pgAdmin (PostgreSQL GUI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin-user-service
+    ports:
+      - "8080:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@project5.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./database/pgadmin:/pgadmin4/servers.json
+    depends_on:
+      - postgres
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # Prometheus (Metrics Collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-user-service
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # Grafana (Metrics Visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-user-service
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # Jaeger (Distributed Tracing)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger-user-service
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector
+      - "14250:14250"  # Jaeger gRPC
+      - "6831:6831/udp"  # Jaeger agent
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=debug
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # Elasticsearch (Logging)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: elasticsearch-user-service
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - project5-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Kibana (Log Visualization)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: kibana-user-service
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - xpack.security.enabled=false
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # Logstash (Log Processing)
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.8.0
+    container_name: logstash-user-service
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    volumes:
+      - ./monitoring/logstash/pipeline:/usr/share/logstash/pipeline
+      - ./monitoring/logstash/config:/usr/share/logstash/config
+      - ./logs:/usr/share/logstash/logs
+    environment:
+      - "LS_JAVA_OPTS=-Xmx256m -Xms256m"
+    depends_on:
+      - elasticsearch
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # Nginx (Reverse Proxy)
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-user-service
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - user-service
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # Mailhog (Email Testing)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: mailhog-user-service
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # MinIO (S3-compatible Object Storage)
+  minio:
+    image: minio/minio:latest
+    container_name: minio-user-service
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - project5-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+
+  # Traefik (Load Balancer)
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik-user-service
+    ports:
+      - "8090:8080"  # Dashboard
+      - "8000:80"    # HTTP
+      - "8443:443"   # HTTPS
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+      - ./traefik/dynamic:/etc/traefik/dynamic
+    networks:
+      - project5-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+
+  # Test Database (for testing)
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: postgres-test
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=project5_test
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    networks:
+      - project5-network
+    restart: "no"
+    profiles:
+      - testing
+
+  # Test Redis (for testing)
+  redis-test:
+    image: redis:7-alpine
+    container_name: redis-test
+    ports:
+      - "6380:6379"
+    networks:
+      - project5-network
+    restart: "no"
+    profiles:
+      - testing
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_test_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  project5-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Development overrides
+# Use: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+# This file will be automatically loaded by docker-compose
