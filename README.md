@@ -132,6 +132,9 @@ Project-5/
 │   ├── vault/
 │   ├── policies/
 │   └── scanning/
+├── config/                        # Environment configurations
+│   ├── deploy.yaml
+│   └── environments/
 ├── scripts/                       # Automation scripts
 │   ├── deployment/
 │   ├── monitoring/
@@ -139,6 +142,7 @@ Project-5/
 └── tests/                         # Testing suites
     ├── unit/
     ├── integration/
+    ├── performance/
     └── e2e/
 ```
 

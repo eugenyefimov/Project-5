@@ -1,0 +1,290 @@
+# Prometheus Alert Rules for Project-5 Multi-Cloud Infrastructure
+# Comprehensive alerting for application, infrastructure, and security monitoring
+
+groups:
+  # Application Health Alerts
+  - name: application.rules
+    rules:
+      - alert: ApplicationDown
+        expr: up{job=~"frontend|backend-api|microservices"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Application {{ $labels.job }} is down"
+          description: "Application {{ $labels.job }} on instance {{ $labels.instance }} has been down for more than 1 minute."
+          runbook_url: "https://docs.project5.com/runbooks/application-down"
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            rate(http_requests_total{status=~"5.."}[5m]) /
+            rate(http_requests_total[5m])
+          ) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }}% for {{ $labels.job }} on {{ $labels.instance }}"
+
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s for {{ $labels.job }}"
+
+      - alert: DatabaseConnectionFailure
+        expr: up{job="postgres"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: database
+        annotations:
+          summary: "Database connection failure"
+          description: "PostgreSQL database is unreachable for more than 2 minutes"
+
+  # Infrastructure Alerts
+  - name: infrastructure.rules
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}% on instance {{ $labels.instance }}"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) /
+            node_memory_MemTotal_bytes
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}% on instance {{ $labels.instance }}"
+
+      - alert: DiskSpaceRunningOut
+        expr: |
+          (
+            (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) /
+            node_filesystem_size_bytes{fstype!="tmpfs"}
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Disk space running out"
+          description: "Disk usage is {{ $value }}% on {{ $labels.device }} at {{ $labels.instance }}"
+
+      - alert: HighNetworkTraffic
+        expr: rate(node_network_receive_bytes_total[5m]) > 100000000  # 100MB/s
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "High network traffic detected"
+          description: "Network receive traffic is {{ $value | humanize }}B/s on {{ $labels.device }} at {{ $labels.instance }}"
+
+  # Kubernetes Alerts
+  - name: kubernetes.rules
+    rules:
+      - alert: KubernetesPodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Pod is crash looping"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping"
+
+      - alert: KubernetesPodNotReady
+        expr: kube_pod_status_ready{condition="false"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Pod not ready"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been not ready for more than 5 minutes"
+
+      - alert: KubernetesNodeNotReady
+        expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: infrastructure
+        annotations:
+          summary: "Kubernetes node not ready"
+          description: "Node {{ $labels.node }} has been not ready for more than 5 minutes"
+
+      - alert: KubernetesDeploymentReplicasMismatch
+        expr: kube_deployment_spec_replicas != kube_deployment_status_available_replicas
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Deployment replicas mismatch"
+          description: "Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }} has {{ $value }} available replicas, expected {{ $labels.spec_replicas }}"
+
+  # Security Alerts
+  - name: security.rules
+    rules:
+      - alert: UnauthorizedAPIAccess
+        expr: rate(http_requests_total{status="401"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "High rate of unauthorized API access"
+          description: "High rate of 401 responses detected: {{ $value }} requests/second"
+
+      - alert: SuspiciousLoginActivity
+        expr: rate(auth_login_failures_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Suspicious login activity detected"
+          description: "High rate of login failures: {{ $value }} failures/second"
+
+      - alert: TLSCertificateExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 86400 * 7  # 7 days
+        for: 1h
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "TLS certificate expiring soon"
+          description: "TLS certificate for {{ $labels.instance }} expires in {{ $value | humanizeDuration }}"
+
+  # Multi-Cloud Alerts
+  - name: multicloud.rules
+    rules:
+      - alert: AWSServiceDown
+        expr: up{job=~".*aws.*"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          team: cloud-ops
+          cloud: aws
+        annotations:
+          summary: "AWS service is down"
+          description: "AWS service {{ $labels.job }} is unreachable"
+
+      - alert: AzureServiceDown
+        expr: up{job=~".*azure.*"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          team: cloud-ops
+          cloud: azure
+        annotations:
+          summary: "Azure service is down"
+          description: "Azure service {{ $labels.job }} is unreachable"
+
+      - alert: GCPServiceDown
+        expr: up{job=~".*gcp.*"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          team: cloud-ops
+          cloud: gcp
+        annotations:
+          summary: "GCP service is down"
+          description: "GCP service {{ $labels.job }} is unreachable"
+
+      - alert: MultiCloudLatencyHigh
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~".*cloud.*"}[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: cloud-ops
+        annotations:
+          summary: "High latency in multi-cloud communication"
+          description: "95th percentile latency is {{ $value }}s for {{ $labels.job }}"
+
+  # Business Logic Alerts
+  - name: business.rules
+    rules:
+      - alert: LowUserRegistrations
+        expr: rate(user_registrations_total[1h]) < 1
+        for: 30m
+        labels:
+          severity: warning
+          team: product
+        annotations:
+          summary: "Low user registration rate"
+          description: "User registration rate is {{ $value }} registrations/hour"
+
+      - alert: HighUserChurnRate
+        expr: rate(user_deletions_total[24h]) / rate(user_registrations_total[24h]) > 0.1
+        for: 1h
+        labels:
+          severity: warning
+          team: product
+        annotations:
+          summary: "High user churn rate detected"
+          description: "User churn rate is {{ $value | humanizePercentage }}"
+
+  # Performance Alerts
+  - name: performance.rules
+    rules:
+      - alert: HighDatabaseConnections
+        expr: pg_stat_database_numbackends > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "High number of database connections"
+          description: "Database has {{ $value }} active connections"
+
+      - alert: SlowDatabaseQueries
+        expr: pg_stat_activity_max_tx_duration > 300  # 5 minutes
+        for: 2m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Longest running query duration is {{ $value }}s"
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          team: cache
+        annotations:
+          summary: "Redis high memory usage"
+          description: "Redis memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: HighCacheHitRatio
+        expr: redis_keyspace_hits_total / (redis_keyspace_hits_total + redis_keyspace_misses_total) < 0.8
+        for: 10m
+        labels:
+          severity: warning
+          team: cache
+        annotations:
+          summary: "Low cache hit ratio"
+          description: "Cache hit ratio is {{ $value | humanizePercentage }}"

@@ -1,4 +1,4 @@
-name: Deploy to Multi-Cloud
+name: Deploy Multi-Cloud
 
 on:
   push:

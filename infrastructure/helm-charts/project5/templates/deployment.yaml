@@ -1,0 +1,156 @@
+{{- range .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.namespace | default "default" }}
+  labels:
+    app: {{ .name }}
+    chart: {{ $.Chart.Name }}-{{ $.Chart.Version | replace "+" "_" }}
+    release: {{ $.Release.Name }}
+    heritage: {{ $.Release.Service }}
+    tier: {{ .tier | default "application" }}
+spec:
+  replicas: {{ .replicas | default 3 }}
+  selector:
+    matchLabels:
+      app: {{ .name }}
+      release: {{ $.Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+        release: {{ $.Release.Name }}
+        tier: {{ .tier | default "application" }}
+      annotations:
+        prometheus.io/scrape: "{{ .monitoring.prometheus.scrape | default "true" }}"
+        prometheus.io/port: "{{ .port | default 3000 }}"
+        prometheus.io/path: "{{ .monitoring.prometheus.path | default "/metrics" }}"
+    spec:
+      serviceAccountName: {{ .name }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .securityContext.runAsUser | default 1000 }}
+        fsGroup: {{ .securityContext.fsGroup | default 2000 }}
+      containers:
+      - name: {{ .name }}
+        image: "{{ .image.repository }}:{{ .image.tag | default $.Chart.AppVersion }}"
+        imagePullPolicy: {{ .image.pullPolicy | default "Always" }}
+        ports:
+        - containerPort: {{ .port | default 3000 }}
+          name: http
+          protocol: TCP
+        env:
+        {{- range $key, $value := .env }}
+        - name: {{ $key }}
+          {{- if $value.valueFrom }}
+          valueFrom:
+            {{- if $value.valueFrom.secretKeyRef }}
+            secretKeyRef:
+              name: {{ $value.valueFrom.secretKeyRef.name }}
+              key: {{ $value.valueFrom.secretKeyRef.key }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            configMapKeyRef:
+              name: {{ $value.valueFrom.configMapKeyRef.name }}
+              key: {{ $value.valueFrom.configMapKeyRef.key }}
+            {{- end }}
+          {{- else }}
+          value: "{{ $value }}"
+          {{- end }}
+        {{- end }}
+        resources:
+          {{- toYaml .resources | nindent 10 }}
+        {{- if .healthCheck.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .healthCheck.liveness.path | default "/health" }}
+            port: {{ .port | default 3000 }}
+          initialDelaySeconds: {{ .healthCheck.liveness.initialDelaySeconds | default 30 }}
+          periodSeconds: {{ .healthCheck.liveness.periodSeconds | default 10 }}
+          timeoutSeconds: {{ .healthCheck.liveness.timeoutSeconds | default 5 }}
+          failureThreshold: {{ .healthCheck.liveness.failureThreshold | default 3 }}
+        readinessProbe:
+          httpGet:
+            path: {{ .healthCheck.readiness.path | default "/ready" }}
+            port: {{ .port | default 3000 }}
+          initialDelaySeconds: {{ .healthCheck.readiness.initialDelaySeconds | default 5 }}
+          periodSeconds: {{ .healthCheck.readiness.periodSeconds | default 5 }}
+          timeoutSeconds: {{ .healthCheck.readiness.timeoutSeconds | default 3 }}
+          failureThreshold: {{ .healthCheck.readiness.failureThreshold | default 3 }}
+        {{- end }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: {{ .securityContext.readOnlyRootFilesystem | default true }}
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- if .persistence.enabled }}
+        - name: {{ .name }}-storage
+          mountPath: {{ .persistence.mountPath }}
+        {{- end }}
+        {{- range .volumeMounts }}
+        - name: {{ .name }}
+          mountPath: {{ .mountPath }}
+          {{- if .subPath }}
+          subPath: {{ .subPath }}
+          {{- end }}
+          {{- if .readOnly }}
+          readOnly: {{ .readOnly }}
+          {{- end }}
+        {{- end }}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- if .persistence.enabled }}
+      - name: {{ .name }}-storage
+        persistentVolumeClaim:
+          claimName: {{ .name }}-pvc
+      {{- end }}
+      {{- range .volumes }}
+      - name: {{ .name }}
+        {{- if .configMap }}
+        configMap:
+          name: {{ .configMap.name }}
+          {{- if .configMap.items }}
+          items:
+          {{- range .configMap.items }}
+          - key: {{ .key }}
+            path: {{ .path }}
+          {{- end }}
+          {{- end }}
+        {{- else if .secret }}
+        secret:
+          secretName: {{ .secret.secretName }}
+          {{- if .secret.items }}
+          items:
+          {{- range .secret.items }}
+          - key: {{ .key }}
+            path: {{ .path }}
+          {{- end }}
+          {{- end }}
+        {{- else if .emptyDir }}
+        emptyDir: {}
+        {{- end }}
+      {{- end }}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: {{ .terminationGracePeriodSeconds | default 30 }}
+      dnsPolicy: ClusterFirst
+      {{- if .affinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - {{ .name }}
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+{{- end }}

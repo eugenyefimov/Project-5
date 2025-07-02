@@ -1,0 +1,337 @@
+# Prometheus Recording Rules for Project-5 Multi-Cloud Infrastructure
+# Pre-computed metrics for performance optimization and complex queries
+
+groups:
+  # Application Performance Recording Rules
+  - name: application_performance.rules
+    interval: 30s
+    rules:
+      # HTTP Request Rate
+      - record: http:request_rate_5m
+        expr: rate(http_requests_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      - record: http:request_rate_1h
+        expr: rate(http_requests_total[1h])
+        labels:
+          aggregation: "1h_rate"
+
+      # HTTP Error Rate
+      - record: http:error_rate_5m
+        expr: |
+          rate(http_requests_total{status=~"5.."}[5m]) /
+          rate(http_requests_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      - record: http:error_rate_1h
+        expr: |
+          rate(http_requests_total{status=~"5.."}[1h]) /
+          rate(http_requests_total[1h])
+        labels:
+          aggregation: "1h_rate"
+
+      # Response Time Percentiles
+      - record: http:response_time_p50_5m
+        expr: histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))
+        labels:
+          quantile: "0.50"
+          aggregation: "5m"
+
+      - record: http:response_time_p95_5m
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+        labels:
+          quantile: "0.95"
+          aggregation: "5m"
+
+      - record: http:response_time_p99_5m
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+        labels:
+          quantile: "0.99"
+          aggregation: "5m"
+
+      # Application Availability
+      - record: app:availability_5m
+        expr: avg_over_time(up{job=~"frontend|backend-api|microservices"}[5m])
+        labels:
+          aggregation: "5m_avg"
+
+      - record: app:availability_1h
+        expr: avg_over_time(up{job=~"frontend|backend-api|microservices"}[1h])
+        labels:
+          aggregation: "1h_avg"
+
+  # Infrastructure Performance Recording Rules
+  - name: infrastructure_performance.rules
+    interval: 30s
+    rules:
+      # CPU Usage
+      - record: node:cpu_usage_5m
+        expr: |
+          100 - (
+            avg by(instance) (
+              irate(node_cpu_seconds_total{mode="idle"}[5m])
+            ) * 100
+          )
+        labels:
+          aggregation: "5m_avg"
+
+      - record: node:cpu_usage_1h
+        expr: |
+          100 - (
+            avg by(instance) (
+              irate(node_cpu_seconds_total{mode="idle"}[1h])
+            ) * 100
+          )
+        labels:
+          aggregation: "1h_avg"
+
+      # Memory Usage
+      - record: node:memory_usage_5m
+        expr: |
+          (
+            (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) /
+            node_memory_MemTotal_bytes
+          ) * 100
+        labels:
+          aggregation: "5m"
+
+      # Disk Usage
+      - record: node:disk_usage_5m
+        expr: |
+          (
+            (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) /
+            node_filesystem_size_bytes{fstype!="tmpfs"}
+          ) * 100
+        labels:
+          aggregation: "5m"
+
+      # Network I/O
+      - record: node:network_receive_rate_5m
+        expr: rate(node_network_receive_bytes_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      - record: node:network_transmit_rate_5m
+        expr: rate(node_network_transmit_bytes_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      # Disk I/O
+      - record: node:disk_read_rate_5m
+        expr: rate(node_disk_read_bytes_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      - record: node:disk_write_rate_5m
+        expr: rate(node_disk_written_bytes_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+  # Kubernetes Performance Recording Rules
+  - name: kubernetes_performance.rules
+    interval: 30s
+    rules:
+      # Pod CPU Usage
+      - record: k8s:pod_cpu_usage_5m
+        expr: |
+          rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      # Pod Memory Usage
+      - record: k8s:pod_memory_usage_5m
+        expr: |
+          container_memory_working_set_bytes{container!="POD",container!=""}
+        labels:
+          aggregation: "5m"
+
+      # Pod Network I/O
+      - record: k8s:pod_network_receive_rate_5m
+        expr: rate(container_network_receive_bytes_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      - record: k8s:pod_network_transmit_rate_5m
+        expr: rate(container_network_transmit_bytes_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      # Cluster Resource Utilization
+      - record: k8s:cluster_cpu_utilization_5m
+        expr: |
+          sum(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) /
+          sum(kube_node_status_allocatable{resource="cpu"})
+        labels:
+          aggregation: "5m_cluster"
+
+      - record: k8s:cluster_memory_utilization_5m
+        expr: |
+          sum(container_memory_working_set_bytes{container!="POD",container!=""}) /
+          sum(kube_node_status_allocatable{resource="memory"})
+        labels:
+          aggregation: "5m_cluster"
+
+  # Database Performance Recording Rules
+  - name: database_performance.rules
+    interval: 30s
+    rules:
+      # PostgreSQL Connection Usage
+      - record: postgres:connection_usage_5m
+        expr: |
+          pg_stat_database_numbackends /
+          pg_settings_max_connections
+        labels:
+          aggregation: "5m"
+
+      # PostgreSQL Query Rate
+      - record: postgres:query_rate_5m
+        expr: rate(pg_stat_database_xact_commit[5m]) + rate(pg_stat_database_xact_rollback[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      # PostgreSQL Cache Hit Ratio
+      - record: postgres:cache_hit_ratio_5m
+        expr: |
+          pg_stat_database_blks_hit /
+          (pg_stat_database_blks_hit + pg_stat_database_blks_read)
+        labels:
+          aggregation: "5m"
+
+      # Redis Memory Usage
+      - record: redis:memory_usage_5m
+        expr: |
+          redis_memory_used_bytes /
+          redis_memory_max_bytes
+        labels:
+          aggregation: "5m"
+
+      # Redis Operations Rate
+      - record: redis:ops_rate_5m
+        expr: rate(redis_commands_processed_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      # Redis Cache Hit Ratio
+      - record: redis:cache_hit_ratio_5m
+        expr: |
+          redis_keyspace_hits_total /
+          (redis_keyspace_hits_total + redis_keyspace_misses_total)
+        labels:
+          aggregation: "5m"
+
+  # Multi-Cloud Performance Recording Rules
+  - name: multicloud_performance.rules
+    interval: 60s
+    rules:
+      # Cross-Cloud Latency
+      - record: multicloud:latency_p95_5m
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job=~".*cloud.*"}[5m])
+          )
+        labels:
+          quantile: "0.95"
+          aggregation: "5m"
+
+      # Cloud Provider Availability
+      - record: multicloud:aws_availability_5m
+        expr: avg_over_time(up{job=~".*aws.*"}[5m])
+        labels:
+          cloud: "aws"
+          aggregation: "5m_avg"
+
+      - record: multicloud:azure_availability_5m
+        expr: avg_over_time(up{job=~".*azure.*"}[5m])
+        labels:
+          cloud: "azure"
+          aggregation: "5m_avg"
+
+      - record: multicloud:gcp_availability_5m
+        expr: avg_over_time(up{job=~".*gcp.*"}[5m])
+        labels:
+          cloud: "gcp"
+          aggregation: "5m_avg"
+
+      # Overall Multi-Cloud Health
+      - record: multicloud:overall_health_5m
+        expr: |
+          (
+            multicloud:aws_availability_5m +
+            multicloud:azure_availability_5m +
+            multicloud:gcp_availability_5m
+          ) / 3
+        labels:
+          aggregation: "5m_avg"
+
+  # Business Metrics Recording Rules
+  - name: business_metrics.rules
+    interval: 300s  # 5 minutes
+    rules:
+      # User Activity Metrics
+      - record: business:active_users_5m
+        expr: count(increase(user_activity_total[5m]) > 0)
+        labels:
+          aggregation: "5m_count"
+
+      - record: business:user_registration_rate_1h
+        expr: rate(user_registrations_total[1h])
+        labels:
+          aggregation: "1h_rate"
+
+      - record: business:user_churn_rate_24h
+        expr: |
+          rate(user_deletions_total[24h]) /
+          rate(user_registrations_total[24h])
+        labels:
+          aggregation: "24h_rate"
+
+      # API Usage Metrics
+      - record: business:api_calls_per_user_5m
+        expr: |
+          rate(http_requests_total{job="backend-api"}[5m]) /
+          business:active_users_5m
+        labels:
+          aggregation: "5m_per_user"
+
+      # Revenue Impact Metrics (if applicable)
+      - record: business:error_cost_impact_5m
+        expr: |
+          http:error_rate_5m *
+          rate(http_requests_total[5m]) *
+          0.01  # Assuming $0.01 cost per failed request
+        labels:
+          aggregation: "5m_cost"
+
+  # Security Metrics Recording Rules
+  - name: security_metrics.rules
+    interval: 60s
+    rules:
+      # Authentication Metrics
+      - record: security:login_failure_rate_5m
+        expr: rate(auth_login_failures_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      - record: security:login_success_rate_5m
+        expr: rate(auth_login_success_total[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      # Security Events
+      - record: security:unauthorized_access_rate_5m
+        expr: rate(http_requests_total{status="401"}[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      - record: security:forbidden_access_rate_5m
+        expr: rate(http_requests_total{status="403"}[5m])
+        labels:
+          aggregation: "5m_rate"
+
+      # SSL/TLS Metrics
+      - record: security:ssl_cert_expiry_days
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400
+        labels:
+          aggregation: "current"

@@ -1,130 +1,379 @@
-# Default values for project5
+# Default values for Project-5 Enterprise Multi-Cloud Infrastructure
 # This is a YAML-formatted file.
 
-replicaCount: 2
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
 
-image:
-  repository: project5
-  pullPolicy: IfNotPresent
-  tag: "latest"
+# Namespace configuration
+namespace: default
 
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
+# Services configuration
+services:
+  # Frontend Service (React.js)
+  - name: frontend
+    tier: frontend
+    replicas: 3
+    image:
+      repository: project5/frontend
+      tag: "latest"
+      pullPolicy: Always
+    port: 80
+    targetPort: 80
+    service:
+      enabled: true
+      type: ClusterIP
+      ports:
+        - port: 80
+          targetPort: 80
+          name: http
+    serviceAccount:
+      create: true
+      automount: false
+    env:
+      NODE_ENV: production
+      REACT_APP_API_URL:
+        valueFrom:
+          configMapKeyRef:
+            name: frontend-config
+            key: api-url
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    healthCheck:
+      enabled: true
+      liveness:
+        path: /health
+        initialDelaySeconds: 30
+        periodSeconds: 10
+      readiness:
+        path: /ready
+        initialDelaySeconds: 5
+        periodSeconds: 5
+    securityContext:
+      runAsUser: 1000
+      fsGroup: 2000
+      readOnlyRootFilesystem: true
+    affinity:
+      enabled: true
+    persistence:
+      enabled: false
+    volumeMounts: []
+    volumes: []
 
-serviceAccount:
-  create: true
-  annotations: {}
-  name: ""
+  # Backend API Service (Node.js/Express)
+  - name: backend-api
+    tier: backend
+    replicas: 3
+    image:
+      repository: project5/backend-api
+      tag: "latest"
+      pullPolicy: Always
+    port: 8000
+    targetPort: 8000
+    service:
+      enabled: true
+      type: ClusterIP
+      ports:
+        - port: 80
+          targetPort: 8000
+          name: http
+    serviceAccount:
+      create: true
+      automount: false
+    env:
+      NODE_ENV: production
+      PORT: "8000"
+      DB_HOST:
+        valueFrom:
+          secretKeyRef:
+            name: backend-api-secrets
+            key: db-host
+      DB_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: backend-api-secrets
+            key: db-password
+      REDIS_URL:
+        valueFrom:
+          secretKeyRef:
+            name: backend-api-secrets
+            key: redis-url
+      JWT_SECRET:
+        valueFrom:
+          secretKeyRef:
+            name: backend-api-secrets
+            key: jwt-secret
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "500m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+    healthCheck:
+      enabled: true
+      liveness:
+        path: /health
+        initialDelaySeconds: 30
+        periodSeconds: 10
+      readiness:
+        path: /ready
+        initialDelaySeconds: 5
+        periodSeconds: 5
+    securityContext:
+      runAsUser: 1000
+      fsGroup: 2000
+      readOnlyRootFilesystem: true
+    affinity:
+      enabled: true
+    persistence:
+      enabled: false
+    volumeMounts: []
+    volumes: []
 
-podAnnotations: {}
+  # User Service Microservice
+  - name: user-service
+    tier: microservice
+    replicas: 3
+    image:
+      repository: project5/user-service
+      tag: "latest"
+      pullPolicy: Always
+    port: 3000
+    targetPort: 3000
+    service:
+      enabled: true
+      type: ClusterIP
+      ports:
+        - port: 80
+          targetPort: 3000
+          name: http
+    serviceAccount:
+      create: true
+      automount: false
+    env:
+      NODE_ENV: production
+      PORT: "3000"
+      DB_HOST:
+        valueFrom:
+          secretKeyRef:
+            name: user-service-secrets
+            key: db-host
+      DB_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: user-service-secrets
+            key: db-password
+      REDIS_URL:
+        valueFrom:
+          secretKeyRef:
+            name: user-service-secrets
+            key: redis-url
+      JWT_SECRET:
+        valueFrom:
+          secretKeyRef:
+            name: user-service-secrets
+            key: jwt-secret
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    healthCheck:
+      enabled: true
+      liveness:
+        path: /health
+        initialDelaySeconds: 30
+        periodSeconds: 10
+      readiness:
+        path: /ready
+        initialDelaySeconds: 5
+        periodSeconds: 5
+    securityContext:
+      runAsUser: 1000
+      fsGroup: 2000
+      readOnlyRootFilesystem: true
+    affinity:
+      enabled: true
+    persistence:
+      enabled: false
+    volumeMounts: []
+    volumes: []
 
-podSecurityContext:
-  fsGroup: 2000
-
-securityContext:
-  capabilities:
-    drop:
-    - ALL
-  readOnlyRootFilesystem: true
-  runAsNonRoot: true
-  runAsUser: 1000
-
-service:
-  type: ClusterIP
-  port: 80
-
+# Ingress configuration
 ingress:
-  enabled: false
-  className: ""
-  annotations: {}
+  enabled: true
+  name: project5-ingress
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
   hosts:
-    - host: project5.local
+    - host: project5.example.com
       paths:
         - path: /
           pathType: Prefix
-  tls: []
-
-resources:
-  limits:
-    cpu: 500m
-    memory: 512Mi
-  requests:
-    cpu: 250m
-    memory: 256Mi
-
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 100
-  targetCPUUtilizationPercentage: 80
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
-
-# Frontend configuration
-frontend:
-  enabled: true
-  replicaCount: 2
-  image:
-    repository: project5-frontend
-    tag: "latest"
-  service:
-    port: 80
-    targetPort: 80
-
-# Backend API configuration
-backendApi:
-  enabled: true
-  replicaCount: 2
-  image:
-    repository: project5-backend-api
-    tag: "latest"
-  service:
-    port: 8000
-    targetPort: 8000
-
-# Microservices configuration
-microservices:
-  userService:
-    enabled: true
-    replicaCount: 1
-    image:
-      repository: user-service
-      tag: "latest"
-    service:
-      port: 3001
-      targetPort: 3001
+          backend:
+            service:
+              name: frontend
+              port:
+                number: 80
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: backend-api
+              port:
+                number: 80
+        - path: /api/users
+          pathType: Prefix
+          backend:
+            service:
+              name: user-service
+              port:
+                number: 80
+  tls:
+    - secretName: project5-tls
+      hosts:
+        - project5.example.com
 
 # Database configuration
-postgresql:
-  enabled: true
-  auth:
-    postgresPassword: "changeme"
-    database: "project5"
-  primary:
-    persistence:
+databases:
+  postgresql:
+    enabled: true
+    auth:
+      postgresPassword: "changeme"
+      database: "project5"
+    primary:
+      persistence:
+        enabled: true
+        size: 20Gi
+        storageClass: fast-ssd
+    metrics:
       enabled: true
-      size: 8Gi
-
-# Redis configuration
-redis:
-  enabled: true
-  auth:
-    enabled: false
-  master:
-    persistence:
+    backup:
       enabled: true
-      size: 8Gi
+      schedule: "0 2 * * *"
 
-# Monitoring
+  redis:
+    enabled: true
+    auth:
+      enabled: true
+      password: "changeme"
+    master:
+      persistence:
+        enabled: true
+        size: 10Gi
+        storageClass: fast-ssd
+    metrics:
+      enabled: true
+    cluster:
+      enabled: true
+      slaveCount: 2
+
+# Monitoring and Observability
 monitoring:
   prometheus:
     enabled: true
+    retention: 15d
+    storageSize: 50Gi
+    alertmanager:
+      enabled: true
+    nodeExporter:
+      enabled: true
+    kubeStateMetrics:
+      enabled: true
+  
   grafana:
     enabled: true
+    adminPassword: "changeme"
+    persistence:
+      enabled: true
+      size: 10Gi
+    dashboards:
+      enabled: true
+    plugins:
+      - grafana-piechart-panel
+      - grafana-worldmap-panel
+  
   jaeger:
     enabled: true
+    storage:
+      type: elasticsearch
+      elasticsearch:
+        host: elasticsearch
+        port: 9200
+  
+  elasticsearch:
+    enabled: true
+    replicas: 3
+    minimumMasterNodes: 2
+    persistence:
+      enabled: true
+      size: 30Gi
+  
+  kibana:
+    enabled: true
+    elasticsearch:
+      host: elasticsearch
+      port: 9200
+
+# Security configuration
+security:
+  networkPolicies:
+    enabled: true
+  podSecurityPolicies:
+    enabled: true
+  rbac:
+    enabled: true
+  vault:
+    enabled: true
+    storage:
+      size: 10Gi
+  
+# Autoscaling configuration
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Node configuration
+nodeSelector: {}
+tolerances: []
+affinity: {}
+
+# Resource quotas
+resourceQuotas:
+  enabled: true
+  hard:
+    requests.cpu: "10"
+    requests.memory: 20Gi
+    limits.cpu: "20"
+    limits.memory: 40Gi
+    persistentvolumeclaims: "10"
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: 30
+  storage:
+    type: s3
+    s3:
+      bucket: project5-backups
+      region: us-west-2

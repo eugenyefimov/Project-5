@@ -1,0 +1,215 @@
+version: '3.8'
+
+# Infrastructure Services for Development Environment
+# This file contains core infrastructure services needed for local development
+
+services:
+  # PostgreSQL Database
+  postgresql:
+    image: postgres:13-alpine
+    container_name: project5-infrastructure-postgresql
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=project5_dev
+      - POSTGRES_USER=dev_user
+      - POSTGRES_PASSWORD=dev_password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - project5-infrastructure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev_user -d project5_dev"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache and Session Store
+  redis:
+    image: redis:6-alpine
+    container_name: project5-infrastructure-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass dev_redis_password
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - project5-infrastructure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Elasticsearch for Logging
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
+    container_name: project5-infrastructure-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - project5-infrastructure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Kibana for Log Visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.0
+    container_name: project5-infrastructure-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - project5-infrastructure
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus for Metrics Collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: project5-infrastructure-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../monitoring/prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - project5-infrastructure
+    restart: unless-stopped
+
+  # Grafana for Metrics Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: project5-infrastructure-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ../monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - project5-infrastructure
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # Jaeger for Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: project5-infrastructure-jaeger
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+    environment:
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+      - SPAN_STORAGE_TYPE=elasticsearch
+      - ES_SERVER_URLS=http://elasticsearch:9200
+    networks:
+      - project5-infrastructure
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  # HashiCorp Vault for Secrets Management
+  vault:
+    image: vault:latest
+    container_name: project5-infrastructure-vault
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=dev-root-token
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault_data:/vault/data
+      - ../security/vault/config.hcl:/vault/config/config.hcl
+    networks:
+      - project5-infrastructure
+    restart: unless-stopped
+    command: vault server -dev -dev-listen-address=0.0.0.0:8200
+
+  # MinIO for S3-compatible Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: project5-infrastructure-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    volumes:
+      - minio_data:/data
+    networks:
+      - project5-infrastructure
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Networks
+networks:
+  project5-infrastructure:
+    driver: bridge
+    name: project5-infrastructure
+    external: false
+
+# Volumes
+volumes:
+  postgresql_data:
+    driver: local
+  redis_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  vault_data:
+    driver: local
+  minio_data:
+    driver: local

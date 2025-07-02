@@ -1,0 +1,177 @@
+version: '3.8'
+
+services:
+  # Frontend Service
+  frontend:
+    build:
+      context: ./applications/frontend
+      dockerfile: Dockerfile
+    image: project5-frontend:dev
+    container_name: project5-frontend-dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_ENVIRONMENT=development
+    volumes:
+      - ./applications/frontend/src:/app/src
+      - ./applications/frontend/public:/app/public
+    networks:
+      - project5-network
+    depends_on:
+      - backend-api
+    restart: unless-stopped
+
+  # Backend API Service
+  backend-api:
+    build:
+      context: ./applications/backend-api
+      dockerfile: Dockerfile
+    image: project5-backend-api:dev
+    container_name: project5-backend-api-dev
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ENV=development
+      - PORT=8000
+      - DB_HOST=postgresql
+      - DB_PORT=5432
+      - DB_NAME=project5_dev
+      - DB_USER=dev_user
+      - DB_PASSWORD=dev_password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=dev_jwt_secret_key_change_in_production
+    volumes:
+      - ./applications/backend-api/src:/app/src
+      - ./logs:/app/logs
+    networks:
+      - project5-network
+    depends_on:
+      - postgresql
+      - redis
+    restart: unless-stopped
+
+  # User Service Microservice
+  user-service:
+    build:
+      context: ./applications/microservices/user-service
+      dockerfile: Dockerfile
+    image: project5-user-service:dev
+    container_name: project5-user-service-dev
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DB_HOST=postgresql
+      - DB_PORT=5432
+      - DB_NAME=project5_dev
+      - DB_USER=dev_user
+      - DB_PASSWORD=dev_password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=dev_jwt_secret_key_change_in_production
+    volumes:
+      - ./applications/microservices/user-service/src:/app/src
+    networks:
+      - project5-network
+    depends_on:
+      - postgresql
+      - redis
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgresql:
+    image: postgres:13-alpine
+    container_name: project5-postgresql-dev
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=project5_dev
+      - POSTGRES_USER=dev_user
+      - POSTGRES_PASSWORD=dev_password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
+      - ./applications/databases/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - project5-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev_user -d project5_dev"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:6-alpine
+    container_name: project5-redis-dev
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - project5-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus for Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: project5-prometheus-dev
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+  # Grafana for Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: project5-grafana-dev
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - project5-network
+    restart: unless-stopped
+
+# Networks
+networks:
+  project5-network:
+    driver: bridge
+    name: project5-network
+
+# Volumes
+volumes:
+  postgresql_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

@@ -1,0 +1,56 @@
+{{- range .Values.services }}
+{{- if .service.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.namespace | default "default" }}
+  labels:
+    app: {{ .name }}
+    chart: {{ $.Chart.Name }}-{{ $.Chart.Version | replace "+" "_" }}
+    release: {{ $.Release.Name }}
+    heritage: {{ $.Release.Service }}
+    tier: {{ .tier | default "application" }}
+  {{- if .service.annotations }}
+  annotations:
+    {{- toYaml .service.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .service.type | default "ClusterIP" }}
+  {{- if and (eq .service.type "LoadBalancer") .service.loadBalancerIP }}
+  loadBalancerIP: {{ .service.loadBalancerIP }}
+  {{- end }}
+  {{- if and (eq .service.type "LoadBalancer") .service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- range .service.loadBalancerSourceRanges }}
+    - {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- if and (eq .service.type "ClusterIP") .service.clusterIP }}
+  clusterIP: {{ .service.clusterIP }}
+  {{- end }}
+  {{- if .service.externalIPs }}
+  externalIPs:
+    {{- range .service.externalIPs }}
+    - {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- if .service.sessionAffinity }}
+  sessionAffinity: {{ .service.sessionAffinity }}
+  {{- end }}
+  ports:
+  {{- range .service.ports }}
+  - port: {{ .port }}
+    targetPort: {{ .targetPort | default .port }}
+    protocol: {{ .protocol | default "TCP" }}
+    name: {{ .name | default "http" }}
+    {{- if and (or (eq $.service.type "NodePort") (eq $.service.type "LoadBalancer")) .nodePort }}
+    nodePort: {{ .nodePort }}
+    {{- end }}
+  {{- end }}
+  selector:
+    app: {{ .name }}
+    release: {{ $.Release.Name }}
+{{- end }}
+{{- end }}
