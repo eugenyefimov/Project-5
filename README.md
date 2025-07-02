@@ -91,6 +91,13 @@ This project showcases a complete enterprise application deployment across multi
 - **Jaeger**: Distributed tracing
 - **AlertManager**: Alerting and notifications
 
+### Monitoring & Observability
+- **Prometheus**: Metrics collection
+- **Grafana**: Visualization and dashboards
+- **ELK Stack**: Centralized logging
+- **Jaeger**: Distributed tracing
+- **AlertManager**: Alerting and notifications
+
 ### Security & Compliance
 - **HashiCorp Vault**: Secrets management
 - **Open Policy Agent**: Policy enforcement
@@ -102,48 +109,53 @@ This project showcases a complete enterprise application deployment across multi
 ```
 Project-5/
 ├── README.md
+├── .github/
+│   └── workflows/              # GitHub Actions CI/CD pipelines
+├── applications/                   # Application source code
+│   ├── backend-api/
+│   ├── databases/
+│   ├── frontend/
+│   └── microservices/
+├── ci-cd/                         # CI/CD pipeline configurations
+│   ├── azure-devops/
+│   └── jenkins/
+├── config/                        # Environment configurations
+│   ├── deploy.yaml
+│   └── environments/
+├── docker-compose.dev.yml         # Docker Compose for local development
 ├── docs/                           # Comprehensive documentation
 │   ├── architecture/
 │   ├── deployment/
 │   ├── security/
 │   └── troubleshooting/
 ├── infrastructure/                 # Infrastructure as Code
-│   ├── terraform/
-│   │   ├── aws/
-│   │   ├── azure/
-│   │   └── gcp/
 │   ├── helm-charts/
-│   └── kubernetes/
-├── applications/                   # Application source code
-│   ├── frontend/
-│   ├── backend-api/
-│   ├── microservices/
-│   └── databases/
-├── ci-cd/                         # CI/CD pipeline configurations
-│   ├── github-actions/
-│   ├── azure-devops/
-│   └── jenkins/
+│   ├── kubernetes/
+│   └── terraform/
 ├── monitoring/                    # Monitoring and observability
-│   ├── prometheus/
-│   ├── grafana/
 │   ├── elk-stack/
-│   └── jaeger/
-├── security/                      # Security configurations
-│   ├── vault/
-│   ├── policies/
-│   └── scanning/
-├── config/                        # Environment configurations
-│   ├── deploy.yaml
-│   └── environments/
+│   ├── grafana/
+│   ├── jaeger/
+│   └── prometheus/
+├── requirements.txt               # Python dependencies
 ├── scripts/                       # Automation scripts
 │   ├── deployment/
+│   ├── maintenance/
 │   ├── monitoring/
-│   └── maintenance/
+│   ├── build.sh
+│   ├── deploy-dev.sh
+│   ├── deploy.sh
+│   ├── setup.sh
+│   └── test.sh
+├── security/                      # Security configurations
+│   ├── policies/
+│   ├── scanning/
+│   └── vault/
 └── tests/                         # Testing suites
-    ├── unit/
+    ├── e2e/
     ├── integration/
     ├── performance/
-    └── e2e/
+    └── unit/
 ```
 
 ## 🚀 Getting Started
@@ -160,7 +172,7 @@ Project-5/
 ### Quick Start
 ```bash
 # Clone the repository
-git clone https://github.com/eugenyefimov/Project-5.git
+git clone https://github.com/<your-username>/Project-5.git
 cd Project-5
 
 # Initialize the project
